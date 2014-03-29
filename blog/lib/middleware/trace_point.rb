@@ -6,19 +6,30 @@ module Middleware
     end
 
     def call(env)
-      stats = ""
+      all = ""
+      stats = {}
       trace = ::TracePoint.new(:call) do |tp|
         #p [tp.lineno, tp.defined_class, tp.method_id, tp.event]
-        stats << "#{tp.defined_class} #{tp.method_id}\n"
+        all << "#{tp.defined_class} #{tp.method_id}\n"
+
+        stats[tp.defined_class] ||= {}
+        stats[tp.defined_class][tp.method_id] ||= 0
+        stats[tp.defined_class][tp.method_id] += 1
       end
 
       trace.enable
       response = @app.call(env)
       trace.disable
 
-      File.open("/Users/simeon/Desktop/trace.txt", "w") do |f|
-        f.write stats
-      end
+      puts "#{stats.keys.size} classes used"
+      puts "#{stats.map{|k,v| v.keys}.flatten.size} methods used"
+      puts "#{stats.map{|k,v| v.values}.flatten.sum} methods dispatched"
+
+      file_name = "/Users/simeon/Desktop/traces/#{env['PATH_INFO'].gsub('/', '_')}"
+
+      File.open("#{file_name}_req_stats.json", "w") {|f| f << stats.to_json}
+
+      File.open("#{file_name}_all.txt", "w") {|f| f << all }
 
       response
     end
