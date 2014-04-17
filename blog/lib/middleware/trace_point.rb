@@ -63,7 +63,7 @@ module Middleware
       puts "#{stats.map{|k,v| v.keys}.flatten.size} methods used"
       puts "#{stats.map{|k,v| v.values}.flatten.sum} methods dispatched"
 
-      file_name = "/Users/simeon/Desktop/traces/#{env['PATH_INFO'].gsub('/', '_')}"
+      file_name = File.join(Rails.root, '..', 'traces', env['PATH_INFO'].gsub('/', '_'))
 
       File.open("#{file_name}_req_stats.json", "w") {|f| f << stats.to_json}
 
