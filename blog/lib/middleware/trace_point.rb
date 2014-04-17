@@ -9,8 +9,8 @@ module Middleware
       all = ""
       stats = {}
       trace = ::TracePoint.new(:call) do |tp|
-        #p [tp.lineno, tp.defined_class, tp.method_id, tp.event]
-        all << "#{tp.defined_class} #{tp.method_id}\n"
+
+        all << "#{tp.defined_class} #{tp.method_id} #{tp.lineno} #{tp.path}\n"
 
         stats[tp.defined_class] ||= {}
         stats[tp.defined_class][tp.method_id] ||= 0
