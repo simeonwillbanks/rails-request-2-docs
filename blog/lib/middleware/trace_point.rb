@@ -1,3 +1,5 @@
+require "cgi"
+
 module Middleware
   class TracePoint
 
@@ -6,49 +8,65 @@ module Middleware
     end
 
     def call(env)
-      all = ""
+      # TODO
+      # Move procedural logic into objects
+
+      csv = "Defined Class,Method ID,Line Number,Path\n"
+      markdown = "### #{env['REQUEST_URI']}\n"
       stats = {}
+
       trace = ::TracePoint.new(:call) do |tp|
 
-        all << "#{tp.defined_class} #{tp.method_id} #{tp.lineno} #{tp.path}\n"
+        csv << "#{tp.defined_class},#{tp.method_id},#{tp.lineno},#{tp.path}\n"
 
-        # Ruby EXAMPLE
-        #
-        # Fixnum to_s 59 /Users/simeon/.rbenv/versions/2.1.1/lib/ruby/2.1.0/securerandom.rb
-        #
-        # http://www.omniref.com/?q=Fixnum##to_s
-        # http://www.omniref.com/ruby/2.1.1/classes/Fixnum##to_s
-        # http://ruby-doc.org/core-2.1.1/Fixnum.html#method-i-to_s
+        path = tp.path.sub("#{File.expand_path("~/.rbenv/versions")}/", "")
 
-        # Ruby Stdlib EXAMPLE
-        # Ruby 2.1.1 sha1 1980b4d4e4cc1dfd7f04d88c03e9f0a60dd4e94e
-        #
-        # Mutex_m mu_synchronize 72 /Users/simeon/.rbenv/versions/2.1.1/lib/ruby/2.1.0/mutex_m.rb
-        #
-        # http://www.omniref.com/?q=Mutex_m##mu_synchronize
-        # http://www.omniref.com/ruby/2.1.1/classes/Mutex_m##mu_synchronize
-        # http://ruby-doc.org/stdlib-2.1.1/libdoc/mutex_m/rdoc/Mutex_m.html#method-i-mu_synchronize
-        # https://github.com/ruby/ruby/blob/1980b4d4e4cc1dfd7f04d88c03e9f0a60dd4e94e/lib/mutex_m.rb#L72
+        class_method = tp.defined_class.to_s =~ /\A#<Class:/
 
-        # Rails EXAMPLE
-        # Rails 4.0.4 sha1 2abe4b032d080f7177c6f2e34c9124c468e8a293
-        #
-        # ActionDispatch::RequestId call 19 /Users/simeon/.rbenv/versions/2.1.1/lib/ruby/gems/2.1.0/gems/actionpack-4.0.4/lib/action_dispatch/middleware/request_id.rb
-        #
-        # http://www.omniref.com/?q=ActionDispatch%3A%3ARequestId##call
-        # http://www.omniref.com/ruby/gems/actionpack/4.0.4/classes/ActionDispatch::RequestId##call
-        # http://api.rubyonrails.org/classes/ActionDispatch/RequestId.html#method-i-call
-        # https://github.com/rails/rails/blob/2abe4b032d080f7177c6f2e34c9124c468e8a293/actionpack/lib/action_dispatch/middleware/request_id.rb#L19
+        source = case path
+                 when /ruby\/2.1.0/
+                   :stdlib
+                 when /actionmailer|actionpack|actionview|activemodel|activerecord|activesupport|railties/
+                   :rails
+                 when /ruby\/gems\/2.1.0/
+                   :gem
+                 when /blog/
+                   :blog
+                 end
 
+        basename = File.basename(path)
 
-        # NOTES
-        # - omniref search links have sidebar with other possible matches
+        github_path = case source
+                      when :stdlib
+                        "ruby/ruby/blob/1980b4d4e4cc1dfd7f04d88c03e9f0a60dd4e94e/lib/#{basename}#L#{tp.lineno}"
+                      when :rails
+                        "rails/rails/blob/2abe4b032d080f7177c6f2e34c9124c468e8a293#{path.sub("2.1.1/lib/ruby/gems/2.1.0/gems", "").sub("-4.0.4", "")}#L#{tp.lineno}"
+                      when :blog
+                        "simeonwillbanks/railsdoc/tree/master/#{path.split("railsdoc/")[1]}#L#{tp.lineno}"
+                      end
 
-        # QUESTIONS
-        # - What to do about class methods?
-        #
-        # http://www.omniref.com/?q=OpenURI#.open_uri
+        display_path = case source
+                       when :stdlib
+                         path.sub("2.1.1/lib/ruby/2.1.0", "lib")
+                       when :rails, :gem
+                         path.sub("2.1.1/lib/ruby/gems/2.1.0/gems/", "")
+                       when :blog
+                         path.split("railsdoc/")[1]
+                       end
 
+        method_type = class_method ? "." : "#"
+
+        class_name = if class_method
+                       tp.defined_class.to_s.sub("#<Class:", "").sub(">", "")
+                     else
+                       tp.defined_class.to_s
+                     end
+
+        markdown << "1. **#{class_name}#{method_type}#{tp.method_id}**\n"
+        markdown << "  - `#{display_path}:#{tp.lineno}`\n"
+        markdown << "  - [Docs](http://www.omniref.com/?q=#{CGI::escape(class_name)}##{method_type}#{tp.method_id})"
+        markdown << " | [GitHub](https://github.com/#{github_path})" if github_path
+        markdown << "\n"
 
         stats[tp.defined_class] ||= {}
         stats[tp.defined_class][tp.method_id] ||= 0
@@ -63,11 +81,19 @@ module Middleware
       puts "#{stats.map{|k,v| v.keys}.flatten.size} methods used"
       puts "#{stats.map{|k,v| v.values}.flatten.sum} methods dispatched"
 
-      file_name = File.join(Rails.root, '..', 'traces', env['PATH_INFO'].gsub('/', '_'))
+      path_info = env["PATH_INFO"][1..-1].gsub("/", "_")
 
-      File.open("#{file_name}_req_stats.json", "w") {|f| f << stats.to_json}
+      path_info = "index" if path_info.empty?
 
-      File.open("#{file_name}_all.txt", "w") {|f| f << all }
+      path_info << "_#{env['REQUEST_METHOD']}"
+
+      full_path = File.join(Rails.root, "..", "traces", path_info)
+
+      File.open("#{full_path}_stats.json", "w") {|f| f << stats.to_json}
+
+      File.open("#{full_path}_raw.csv", "w") {|f| f << csv}
+
+      File.open("#{full_path}_docs.md", "w") {|f| f << markdown}
 
       response
     end
