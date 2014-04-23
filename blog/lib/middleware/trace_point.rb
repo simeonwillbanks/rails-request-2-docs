@@ -23,6 +23,14 @@ module Middleware
 
         class_method = tp.defined_class.to_s =~ /\A#<Class:/
 
+        method_type = class_method ? "." : "#"
+
+        class_name = if class_method
+                       tp.defined_class.to_s.sub("#<Class:", "").sub(">", "")
+                     else
+                       tp.defined_class.to_s
+                     end
+
         source = case path
                  when /ruby\/2.1.0/
                    :stdlib
@@ -36,13 +44,22 @@ module Middleware
 
         basename = File.basename(path)
 
+        gem_info = /\/2.1.0\/gems\/(?<name>\S+)-(?<version>\d+.{1}\d+.{1}\d+)\//.match(path)
+
+        omniref_path = case source
+                       when :stdlib
+                         "2.1.1/classes/#{class_name}##{method_type}#{tp.method_id}"
+                       when :rails, :gem
+                         "gems/#{gem_info[:name]}/#{gem_info[:version]}/classes/#{class_name}##{method_type}#{tp.method_id}"
+                       end
+
         github_path = case source
                       when :stdlib
                         "ruby/ruby/blob/1980b4d4e4cc1dfd7f04d88c03e9f0a60dd4e94e/lib/#{basename}#L#{tp.lineno}"
                       when :rails
                         "rails/rails/blob/2abe4b032d080f7177c6f2e34c9124c468e8a293#{path.sub("2.1.1/lib/ruby/gems/2.1.0/gems", "").sub("-4.0.4", "")}#L#{tp.lineno}"
                       when :blog
-                        "simeonwillbanks/railsdoc/tree/master/#{path.split("railsdoc/")[1]}#L#{tp.lineno}"
+                        "simeonwillbanks/rails-request-2-docs/blob/master/#{path.split("rails-request-2-docs/")[1]}#L#{tp.lineno}"
                       end
 
         display_path = case source
@@ -51,22 +68,19 @@ module Middleware
                        when :rails, :gem
                          path.sub("2.1.1/lib/ruby/gems/2.1.0/gems/", "")
                        when :blog
-                         path.split("railsdoc/")[1]
+                         path.split("rails-request-2-docs/")[1]
                        end
-
-        method_type = class_method ? "." : "#"
-
-        class_name = if class_method
-                       tp.defined_class.to_s.sub("#<Class:", "").sub(">", "")
-                     else
-                       tp.defined_class.to_s
-                     end
 
         markdown << "1. **#{class_name}#{method_type}#{tp.method_id}**\n"
         markdown << "  - `#{display_path}:#{tp.lineno}`\n"
-        markdown << "  - [Docs](http://www.omniref.com/?q=#{CGI::escape(class_name)}##{method_type}#{tp.method_id})"
-        markdown << " | [GitHub](https://github.com/#{github_path})" if github_path
-        markdown << "\n"
+
+        markdown_links = []
+
+        markdown_links << "[omniref Docs](http://www.omniref.com/ruby/#{omniref_path})" if omniref_path
+        markdown_links << "[omniref Search](http://www.omniref.com/?q=#{CGI::escape(class_name)}##{method_type}#{tp.method_id})" unless source == :blog
+        markdown_links << "[GitHub](https://github.com/#{github_path})" if github_path
+
+        markdown << " - #{markdown_links.join(" | ")}\n"
 
         stats[tp.defined_class] ||= {}
         stats[tp.defined_class][tp.method_id] ||= 0
