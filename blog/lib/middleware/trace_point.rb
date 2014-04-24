@@ -11,9 +11,31 @@ module Middleware
       # TODO
       # Move procedural logic into objects
 
-      csv = "Defined Class,Method ID,Line Number,Path\n"
-      markdown = "### #{env['REQUEST_URI']}\n"
+      request_uri = env["REQUEST_URI"]
+
+      json = []
       stats = {}
+      csv = "Defined Class,Method ID,Line Number,Path\n"
+      markdown = "### #{request_uri}\n"
+      html_body = ""
+      html = <<-HTML
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>#{request_uri}</title>
+    <style type="text/css">
+      pre { margin: 0 }
+    </style>
+  </head>
+  <body>
+    <h1>#{request_uri}</h1>
+    <ol>
+      %s
+    </ol>
+  </body>
+</html>
+HTML
 
       trace = ::TracePoint.new(:call) do |tp|
 
@@ -32,11 +54,11 @@ module Middleware
                      end
 
         source = case path
-                 when /ruby\/2.1.0/
+                 when %r{/ruby/2.1.0/}
                    :stdlib
                  when /actionmailer|actionpack|actionview|activemodel|activerecord|activesupport|railties/
                    :rails
-                 when /ruby\/gems\/2.1.0/
+                 when %r{/ruby/gems/2.1.0/}
                    :gem
                  when /blog/
                    :blog
@@ -44,7 +66,7 @@ module Middleware
 
         basename = File.basename(path)
 
-        gem_info = /\/2.1.0\/gems\/(?<name>\S+)-(?<version>\d+.{1}\d+.{1}\d+)\//.match(path)
+        gem_info = %r{/2.1.0/gems/(?<name>S+)-(?<version>d+.{1}d+.{1}d+)/}.match(path)
 
         omniref_path = case source
                        when :stdlib
@@ -71,16 +93,52 @@ module Middleware
                          path.split("rails-request-2-docs/")[1]
                        end
 
-        markdown << "1. **#{class_name}#{method_type}#{tp.method_id}**\n"
-        markdown << "  - `#{display_path}:#{tp.lineno}`\n"
+        json_entry = {}
+
+        title = "#{class_name}#{method_type}#{tp.method_id}"
+        markdown << "1. **#{title}**\n"
+        json_entry[:title] = title
+        html_body << %q{<li style="margin-bottom: 1em">}
+        html_body << "<strong>#{title}</strong>\n"
+
+        source = "#{display_path}:#{tp.lineno}"
+        markdown << "  - `#{source}`\n"
+        json_entry[:source] = source
+        html_body << "<ul>\n<li><pre>#{source}</pre></li>\n"
 
         markdown_links = []
+        html_links = []
 
-        markdown_links << "[omniref Docs](http://www.omniref.com/ruby/#{omniref_path})" if omniref_path
-        markdown_links << "[omniref Search](http://www.omniref.com/?q=#{CGI::escape(class_name)}##{method_type}#{tp.method_id})" unless source == :blog
-        markdown_links << "[GitHub](https://github.com/#{github_path})" if github_path
+        if omniref_path
+          json_entry[:omniref] = {}
+
+          omniref_docs = "http://www.omniref.com/ruby/#{omniref_path}"
+          markdown_links << "[omniref Docs](#{omniref_docs})"
+          html_links << %Q{<a href="#{omniref_docs}">omniref Docs</a>}
+          json_entry[:omniref][:docs] = omniref_docs
+
+          omniref_search = "http://www.omniref.com/?q=#{CGI::escape(class_name)}##{method_type}#{tp.method_id}"
+          markdown_links << "[omniref Search](#{omniref_search}"
+          html_links << %Q{<a href="#{omniref_search}">omniref Search</a>}
+          json_entry[:omniref][:search] = omniref_search
+        end
+
+        if github_path
+          github_url = "https://github.com/#{github_path}"
+          markdown_links << "[GitHub](#{github_url})"
+          html_links << %Q{<a href="#{github_url}">GitHub</a>}
+          json_entry[:github] = {url: github_url}
+        end
 
         markdown << " - #{markdown_links.join(" | ")}\n"
+
+        unless html_links.empty?
+          html_body << "<li>#{html_links.join("</li>\n<li>")}</li>\n"
+        end
+
+        html_body << "</ul>\n</li>"
+
+        json << json_entry
 
         stats[tp.defined_class] ||= {}
         stats[tp.defined_class][tp.method_id] ||= 0
@@ -108,6 +166,10 @@ module Middleware
       File.open("#{full_path}_raw.csv", "w") {|f| f << csv}
 
       File.open("#{full_path}_docs.md", "w") {|f| f << markdown}
+
+      File.open("#{full_path}_docs.json", "w") {|f| f << json.to_json}
+
+      File.open("#{full_path}_docs.html", "w") {|f| f << sprintf(html, html_body)}
 
       response
     end
