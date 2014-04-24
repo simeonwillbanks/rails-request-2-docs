@@ -66,7 +66,7 @@ HTML
 
         basename = File.basename(path)
 
-        gem_info = %r{/2.1.0/gems/(?<name>S+)-(?<version>d+.{1}d+.{1}d+)/}.match(path)
+        gem_info = %r{/2.1.0/gems/(?<name>\S+)-(?<version>\d+.{1}\d+.{1}\d+)/}.match(path)
 
         omniref_path = case source
                        when :stdlib
