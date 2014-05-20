@@ -13,6 +13,7 @@ module Middleware
 
       request_uri = env["REQUEST_URI"]
 
+      rails = []
       json = []
       stats = {}
       csv = "Defined Class,Method ID,Line Number,Path\n"
@@ -93,6 +94,16 @@ HTML
                          path.split("rails-request-2-docs/")[1]
                        end
 
+        if source == :rails
+          last = rails.last
+
+          if last.present? && last.has_key?(class_name)
+            last[class_name] << tp.method_id
+          else
+            rails << {class_name => [tp.method_id]}
+          end
+        end
+
         json_entry = {}
 
         title = "#{class_name}#{method_type}#{tp.method_id}"
@@ -161,11 +172,14 @@ HTML
 
       full_path = File.join(Rails.root, "..", "traces", path_info)
 
+
       File.open("#{full_path}_stats.json", "w") {|f| f << stats.to_json}
 
       File.open("#{full_path}_raw.csv", "w") {|f| f << csv}
 
       File.open("#{full_path}_docs.md", "w") {|f| f << markdown}
+
+      File.open("#{full_path}_rails.json", "w") {|f| f << rails.to_json}
 
       File.open("#{full_path}_docs.json", "w") {|f| f << json.to_json}
 
